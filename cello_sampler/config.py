@@ -144,11 +144,11 @@ MIN_LEGATO_DURATION_MS: float = 500.0
 #: Minimum total sounding duration for a vibrato note in ms.  At the slowest
 #: musically valid rate (4 Hz) a minimum of 750 ms guarantees at least 3 full
 #: oscillation cycles, enough to clearly establish the vibrato character.
-MIN_VIBRATO_DURATION_MS: float = 750.0
+MIN_VIBRATO_DURATION_MS: float = 500.0
 
 #: Pitch modulation must exceed this depth (in cents peak-to-peak) to be
 #: classified as vibrato rather than natural intonation variation.
-VIBRATO_MIN_DEPTH_CENTS: float = 20.0
+VIBRATO_MIN_DEPTH_CENTS: float = 8.0
 
 #: Lowest musically valid vibrato oscillation rate in Hz.
 VIBRATO_MIN_RATE_HZ: float = 4.0

@@ -65,7 +65,7 @@ MIN_LOOP_CYCLES: int = 4
 
 #: Maximum normalised splice error (0 = perfect, 1 = maximally different).
 #: Loops with a higher error are skipped and the file is left unmodified.
-MAX_SPLICE_ERROR: float = 0.02
+MAX_SPLICE_ERROR: float = 0.05
 
 #: Width of the zero-crossing search window around the candidate loop end
 #: (in samples).

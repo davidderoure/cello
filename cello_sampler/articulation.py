@@ -251,7 +251,7 @@ def _pitch_modulation_features(
     in_band_peak = float(vibrato_magnitudes.max())
     total_energy = float(fft_mag[1:].max())  # exclude DC
 
-    if total_energy == 0.0 or in_band_peak / total_energy < 0.30:
+    if total_energy == 0.0 or in_band_peak / total_energy < 0.20:
         return depth_cents, 0.0
 
     rate_hz = float(vibrato_freqs[np.argmax(vibrato_magnitudes)])
