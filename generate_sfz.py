@@ -209,13 +209,20 @@ def peak_db(wav_path: Path) -> float | None:
     Reads all channels; the peak is the maximum absolute sample value across
     all channels.  Returns ``None`` if soundfile is unavailable or the file
     cannot be read.
+
+    Bytes are read via Python's built-in I/O and passed to soundfile as a
+    ``BytesIO`` object.  This avoids libsndfile's C-level ``fopen()`` which
+    can fail on network-mounted filesystems (e.g. Google Drive FUSE in Colab)
+    even when Python's own ``open()`` works fine.
     """
     if not _soundfile_available():
         return None
     try:
-        import soundfile as sf
+        import io
         import numpy as np
-        data, _ = sf.read(str(wav_path), dtype="float32", always_2d=True)
+        import soundfile as sf
+        raw = wav_path.read_bytes()          # Python built-in I/O — works on FUSE mounts
+        data, _ = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
         peak = float(np.max(np.abs(data)))
         if peak <= 0.0:
             return None
