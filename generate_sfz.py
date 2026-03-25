@@ -15,6 +15,13 @@ Zone layout
 * Multiple takes of the same note are grouped with ``seq_position`` for
   round-robin playback — each keypress cycles to the next take.
 
+Volume normalisation
+--------------------
+All takes of the same note are normalised to the loudest take using the
+SFZ ``volume`` attribute (a dB offset applied per region).  This keeps
+round-robin takes at a consistent level while preserving natural dynamics
+between different notes.  WAV files are never modified.
+
 Usage::
 
     python generate_sfz.py OUTPUT_DIR [options]
@@ -27,15 +34,22 @@ Usage::
 
     # Cap the key range extension (default 6 semitones either side)
     python generate_sfz.py samples/mono_1/ --max-range 4
+
+    # Skip volume normalisation
+    python generate_sfz.py samples/mono_1/ --no-normalize
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import logging
+import math
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Note helpers
@@ -47,11 +61,24 @@ ALL_ARTICULATIONS = ["legato", "staccato", "vibrato", "pizzicato"]
 # Default maximum semitones a zone extends beyond the outermost sample.
 DEFAULT_MAX_RANGE = 6
 
+# Enharmonic flat → sharp equivalents (after upper-casing the pitch token).
+# "BB" is Bb, not the note B — standalone "B" is left unchanged.
+_FLAT_TO_SHARP: dict[str, str] = {
+    "BB": "A#",
+    "EB": "D#",
+    "AB": "G#",
+    "DB": "C#",
+    "GB": "F#",
+    "CB": "B",
+    "FB": "E",
+}
+
 
 def name_to_midi(name: str) -> int | None:
-    """Convert a note name such as 'A3' or 'C#4' to a MIDI number.
+    """Convert a note name such as 'A3', 'C#4', or 'Bb3' to a MIDI number.
 
     Uses standard scientific pitch notation (A4 = MIDI 69 = 440 Hz).
+    Flat suffixes (e.g. 'Bb', 'Eb') are normalised to their sharp equivalents.
     """
     if not name:
         return None
@@ -59,7 +86,8 @@ def name_to_midi(name: str) -> int | None:
     i = len(name) - 1
     while i > 0 and (name[i].isdigit() or name[i] == "-"):
         i -= 1
-    pitch  = name[:i + 1].upper().replace("B", "A#")   # normalise flats
+    pitch  = name[:i + 1].upper()
+    pitch  = _FLAT_TO_SHARP.get(pitch, pitch)   # normalise flats; leaves "B" intact
     octave = name[i + 1:]
     if pitch not in NOTE_NAMES or not octave.lstrip("-").isdigit():
         return None
@@ -129,6 +157,74 @@ def load_samples(
 
 
 # ---------------------------------------------------------------------------
+# Volume normalisation helpers
+# ---------------------------------------------------------------------------
+
+_SOUNDFILE_AVAILABLE: bool | None = None  # lazily resolved
+
+
+def _soundfile_available() -> bool:
+    global _SOUNDFILE_AVAILABLE
+    if _SOUNDFILE_AVAILABLE is None:
+        try:
+            import soundfile  # noqa: F401
+            _SOUNDFILE_AVAILABLE = True
+        except ImportError:
+            _SOUNDFILE_AVAILABLE = False
+    return _SOUNDFILE_AVAILABLE
+
+
+def peak_db(wav_path: Path) -> float | None:
+    """Return the peak amplitude of *wav_path* in dBFS, or None on error.
+
+    Reads all channels; the peak is the maximum absolute sample value across
+    all channels.  Returns ``None`` if soundfile is unavailable or the file
+    cannot be read.
+    """
+    if not _soundfile_available():
+        return None
+    try:
+        import soundfile as sf
+        import numpy as np
+        data, _ = sf.read(str(wav_path), dtype="float32", always_2d=True)
+        peak = float(np.max(np.abs(data)))
+        if peak <= 0.0:
+            return None
+        return 20.0 * math.log10(peak)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read %s for normalisation: %s", wav_path, exc)
+        return None
+
+
+def note_volume_offsets(wav_paths: list[Path]) -> list[float]:
+    """Return per-take dB offsets that bring all takes to the level of the loudest.
+
+    The loudest take gets offset 0.0 dB; quieter takes get a positive offset
+    so they are boosted to match.  Returns a list of zeros if soundfile is
+    unavailable or no peaks could be measured.
+
+    Args:
+        wav_paths: Ordered list of WAV paths for one note (all takes).
+
+    Returns:
+        List of dB offsets, one per take, same order as *wav_paths*.
+    """
+    peaks = [peak_db(p) for p in wav_paths]
+    valid  = [db for db in peaks if db is not None]
+    if not valid:
+        return [0.0] * len(wav_paths)
+
+    max_db = max(valid)
+    offsets: list[float] = []
+    for db in peaks:
+        if db is None:
+            offsets.append(0.0)
+        else:
+            offsets.append(max_db - db)   # always >= 0
+    return offsets
+
+
+# ---------------------------------------------------------------------------
 # Key-range calculation
 # ---------------------------------------------------------------------------
 
@@ -168,6 +264,7 @@ def generate_sfz(
     notes: dict[int, list[Path]],
     output_dir: Path,
     max_range: int,
+    normalize: bool = True,
 ) -> Path:
     """Write one SFZ file for a single articulation.
 
@@ -176,18 +273,29 @@ def generate_sfz(
         notes:      Mapping of midi_note → [wav_path, ...] (sorted by take).
         output_dir: Root output directory (SFZ written here; paths are relative).
         max_range:  Maximum key-range extension beyond the outermost sample.
+        normalize:  If True, add per-note ``volume`` offsets so all round-robin
+                    takes of the same note play at the same peak level.
 
     Returns:
         Path to the written SFZ file.
     """
     ranges = key_ranges(list(notes.keys()), max_range=max_range)
+
+    norm_note = "(volume-normalised)" if normalize else "(no normalisation)"
     lines  = [
         f"// {art.capitalize()} — generated by generate_sfz.py",
         f"// {len(notes)} notes, "
-        f"{sum(len(v) for v in notes.values())} total samples",
+        f"{sum(len(v) for v in notes.values())} total samples  {norm_note}",
         f"// Load this file in sfizz (https://sfizz.com) as an Audio Unit in Logic Pro.",
         "",
     ]
+
+    if normalize and not _soundfile_available():
+        logger.warning(
+            "soundfile not installed — volume normalisation skipped. "
+            "Run: pip install soundfile"
+        )
+        normalize = False
 
     for midi in sorted(notes.keys()):
         wav_paths = notes[midi]
@@ -195,9 +303,14 @@ def generate_sfz(
         n_takes   = len(wav_paths)
         note_name = midi_to_sfz_name(midi)
 
+        # Compute per-take volume offsets (all zeros when normalize=False).
+        offsets = note_volume_offsets(wav_paths) if normalize else [0.0] * n_takes
+
         lines.append(f"// ── {note_name}  ({n_takes} take{'s' if n_takes > 1 else ''}) ──")
 
-        for seq_pos, wav_path in enumerate(wav_paths, start=1):
+        for seq_pos, (wav_path, vol_offset) in enumerate(
+            zip(wav_paths, offsets), start=1
+        ):
             # Path relative to the SFZ file (both live in output_dir).
             rel = wav_path.relative_to(output_dir)
 
@@ -210,6 +323,8 @@ def generate_sfz(
             lines.append(f"  lokey={lo}")
             lines.append(f"  hikey={hi}")
             lines.append(f"  lovel=0  hivel=127")
+            if normalize and vol_offset != 0.0:
+                lines.append(f"  volume={vol_offset:.2f}")
             lines.append("")
 
     sfz_path = output_dir / f"{art}.sfz"
@@ -248,11 +363,20 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SEMITONES",
         help="Max semitones a zone extends beyond the outermost sample.",
     )
+    p.add_argument(
+        "--no-normalize",
+        action="store_true",
+        default=False,
+        help="Disable per-note volume normalisation (useful if soundfile is not installed).",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(format="%(levelname)s:%(name)s:%(message)s", level=logging.WARNING)
+
     args = build_parser().parse_args(argv)
+    normalize = not args.no_normalize
 
     samples = load_samples(args.output_dir, args.articulations)
 
@@ -261,15 +385,24 @@ def main(argv: list[str] | None = None) -> int:
               "the requested articulations.", file=sys.stderr)
         return 1
 
+    if normalize and not _soundfile_available():
+        print(
+            "Warning: soundfile not installed — volume normalisation skipped.\n"
+            "         Run: pip install soundfile",
+            file=sys.stderr,
+        )
+        normalize = False
+
     for art, notes in samples.items():
         if not notes:
             print(f"  {art:12s}  no samples — skipped")
             continue
 
-        sfz_path = generate_sfz(art, notes, args.output_dir, args.max_range)
+        sfz_path = generate_sfz(art, notes, args.output_dir, args.max_range, normalize=normalize)
         n_notes  = len(notes)
         n_takes  = sum(len(v) for v in notes.values())
-        print(f"  {art:12s}  {n_notes} notes  {n_takes} samples  →  {sfz_path.name}")
+        norm_tag = "" if normalize else "  (no normalisation)"
+        print(f"  {art:12s}  {n_notes} notes  {n_takes} samples  →  {sfz_path.name}{norm_tag}")
 
     print(f"\nSFZ files written to {args.output_dir}")
     print("\nTo use in Logic Pro:")
