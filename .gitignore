@@ -1,0 +1,30 @@
+# Generated gRPC bindings
+generated/recommender_pb2.py
+generated/recommender_pb2_grpc.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Environment
+.env
+
+# Secrets — never commit tokens or credentials
+ghp_*
+gho_*
+github_pat_*
+
+# Test artefacts
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Editor swap/temp files
+*.swp
+*.swo
+*~
