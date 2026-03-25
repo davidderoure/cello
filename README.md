@@ -14,8 +14,7 @@ Automated pipeline for extracting and classifying individual note samples from m
    - **Vibrato** — pitch modulation 4–8 Hz with depth > 8 cents std dev; minimum 500 ms duration
    - **Legato** — everything else; minimum 500 ms duration
 6. **Writes labelled WAV files** preserving all source channels at the original sample rate, plus a CSV index for DAW import
-7. **Embeds loop points** into legato and vibrato samples via `add_loop_points.py`, so Logic Pro Sampler (and other samplers) can sustain notes indefinitely
-8. **Generates SFZ instrument files** via `generate_sfz.py` with explicit MIDI key mappings and per-note volume normalisation for consistent round-robin playback
+7. **Generates SFZ instrument files** via `generate_sfz.py` with explicit MIDI key mappings, `no_loop` playback by default, and per-note volume normalisation for consistent round-robin playback
 
 ## Requirements
 
@@ -56,10 +55,18 @@ Example:
 python process_recording.py session_day1.wav ~/samples/cello/
 ```
 
-### Add loop points (legato and vibrato)
+### Add loop points (optional)
 
-Run after `process_recording.py` to embed sustain loop markers into WAV files.
-Logic Pro Sampler reads these automatically.
+Embeds sustain loop markers into legato and vibrato WAV files.
+
+**For legato samples this is usually not worth it.** Legato cello tone evolves
+continuously (bow pressure, natural vibrato, resonance) so any splice point
+tends to be audible. The default `no_loop` SFZ mode plays each sample once in
+full — completely natural, no artefacts. Skip this step unless your recordings
+are unusually stable and you specifically need infinite sustain.
+
+If you do run it, use `--loop-mode loop_sustain` in `generate_sfz.py` so the
+embedded markers are actually used.
 
 ```bash
 python add_loop_points.py ~/samples/cello/
@@ -95,11 +102,22 @@ python generate_sfz.py ~/samples/cello/ --articulations legato
 # Cap the key range extension (default 6 semitones either side)
 python generate_sfz.py ~/samples/cello/ --max-range 4
 
+# Use sustain looping (only if you ran add_loop_points.py first)
+python generate_sfz.py ~/samples/cello/ --loop-mode loop_sustain
+
 # Skip volume normalisation
 python generate_sfz.py ~/samples/cello/ --no-normalize
 ```
 
-Volume normalisation reads the peak level of each WAV file and adds a `volume`
+**Loop modes:**
+
+| Mode | Behaviour | When to use |
+|---|---|---|
+| `no_loop` (default) | Sample plays once in full, then stops | Always — avoids splice artefacts |
+| `loop_sustain` | Loops while key held; plays tail on release | Only if loop markers were embedded by `add_loop_points.py` |
+| `loop_continuous` | Loops indefinitely, ignores release | Rare; requires very clean loop points |
+
+**Volume normalisation** reads the peak level of each WAV file and adds a `volume`
 dB offset in the SFZ so all round-robin takes of the same note play at the
 same level. WAV files are never modified. Inter-note dynamics (a soft B5 stays
 quieter than a full-bow A2) are preserved.
@@ -183,6 +201,7 @@ command line without touching source code. Common adjustments:
 | Vibrato not detected | Lower `--vibrato-min-depth-cents` (default is already 8.0) |
 | Many notes rejected for low confidence | Lower `--pitch-confidence` (e.g. `0.75`) |
 | Too many short legato/vibrato takes rejected | Raise `MIN_LEGATO_DURATION_MS` / `MIN_VIBRATO_DURATION_MS` in `config.py` |
+| Audible splice/click in looped playback | Use default `no_loop` mode instead of `loop_sustain` |
 | Loop points found in few files | Raise `--max-splice-error` in `add_loop_points.py` (e.g. `0.05`) |
 | Round-robin takes differ in volume | Run `generate_sfz.py` with normalisation enabled (default) |
 
@@ -219,7 +238,8 @@ cello_sampler/
 - **Streaming with carry-buffer** — a 2-second overlap between chunks prevents notes at chunk boundaries being split across two segments
 - **CREPE over YIN/autocorrelation** — cello's variable harmonic balance under bow pressure causes fundamental estimation failures with classical methods; CREPE treats pitch as a 360-bin classification problem and is robust to this
 - **Fundamental energy guard in polyphony detection** — a secondary pitch is only counted as a second voice if spectral energy exists at its own fundamental frequency; this eliminates sub-harmonic artefacts without losing genuine double-stop detection
-- **Minimum duration gates** — legato (500 ms) and vibrato (500 ms) notes below threshold are rejected post-classification, since short takes are not useful for looped playback
+- **Minimum duration gates** — legato (500 ms) and vibrato (500 ms) notes below threshold are rejected post-classification, since very short takes are poor samples regardless of playback mode
+- **`no_loop` by default** — legato cello tone evolves continuously (bow pressure, natural vibrato, body resonance), so any fixed splice point produces an audible artefact; the default SFZ mode plays each sample once in full, which is natural and artefact-free; `loop_sustain` is available for users who need infinite sustain and have stable recordings
 - **Vibrato depth as std dev** — `VIBRATO_MIN_DEPTH_CENTS` is a standard deviation threshold on the pitch contour, not peak-to-peak; for sinusoidal vibrato, std dev = amplitude/√2, so 8 cents std dev corresponds to roughly ±11 cents (22 cents peak-to-peak), typical for cello
 - **SFZ over Logic Sampler auto-map** — Logic Pro's filename-based auto-mapping is unreliable for custom naming conventions; `generate_sfz.py` writes explicit `pitch_keycenter`, `lokey`, and `hikey` values so every note lands on the correct key
 - **Non-destructive normalisation** — round-robin takes are level-matched using the SFZ `volume` attribute (a per-region dB offset); WAV files are never modified, preserving the original recordings

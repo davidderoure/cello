@@ -342,3 +342,61 @@ class TestCli:
         assert rc == 0
         text = (tmp_path / "legato.sfz").read_text()
         assert "volume=" not in text
+
+    def test_default_loop_mode_is_no_loop(self, tmp_path):
+        from generate_sfz import main
+
+        subdir = tmp_path / "legato"
+        subdir.mkdir()
+        wav = subdir / "A3_legato_001.wav"
+        _write_wav(wav, peak=0.5)
+        self._write_index(tmp_path, [
+            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+        ])
+        main([str(tmp_path), "--articulations", "legato"])
+        text = (tmp_path / "legato.sfz").read_text()
+        assert "loop_mode=no_loop" in text
+
+    def test_loop_mode_flag_loop_sustain(self, tmp_path):
+        from generate_sfz import main
+
+        subdir = tmp_path / "legato"
+        subdir.mkdir()
+        wav = subdir / "A3_legato_001.wav"
+        _write_wav(wav, peak=0.5)
+        self._write_index(tmp_path, [
+            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+        ])
+        main([str(tmp_path), "--articulations", "legato", "--loop-mode", "loop_sustain"])
+        text = (tmp_path / "legato.sfz").read_text()
+        assert "loop_mode=loop_sustain" in text
+        assert "loop_mode=no_loop" not in text
+
+
+# ---------------------------------------------------------------------------
+# loop_mode in generate_sfz()
+# ---------------------------------------------------------------------------
+
+
+class TestLoopMode:
+    def test_no_loop_default(self, tmp_path):
+        notes = _make_notes(tmp_path)
+        sfz = generate_sfz("legato", notes, tmp_path, max_range=6, normalize=False)
+        text = sfz.read_text()
+        assert "loop_mode=no_loop" in text
+
+    def test_explicit_loop_sustain(self, tmp_path):
+        notes = _make_notes(tmp_path)
+        sfz = generate_sfz(
+            "legato", notes, tmp_path, max_range=6,
+            normalize=False, loop_mode="loop_sustain",
+        )
+        text = sfz.read_text()
+        assert "loop_mode=loop_sustain" in text
+        assert "loop_mode=no_loop" not in text
+
+    def test_global_header_contains_loop_mode(self, tmp_path):
+        notes = _make_notes(tmp_path)
+        sfz = generate_sfz("legato", notes, tmp_path, max_range=6, normalize=False)
+        text = sfz.read_text()
+        assert "<global> loop_mode=no_loop" in text
