@@ -297,12 +297,44 @@ class TestGenerateSfz:
 
 
 class TestCli:
+    # Match the column names that io.py / process_recording.py actually writes.
+    _CSV_FIELDS = [
+        "filename", "note", "midi_note", "articulation",
+        "pitch_hz", "deviation_cents", "duration_ms",
+        "attack_ms", "decay_db_per_ms",
+        "vibrato_depth_cents", "vibrato_rate_hz",
+        "source_file", "onset_sample",
+    ]
+
     def _write_index(self, output_dir: Path, rows: list[dict]) -> None:
+        """Write a minimal _index.csv using the real pipeline column layout."""
         index = output_dir / "_index.csv"
         with index.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["articulation", "note", "file", "take"])
+            writer = csv.DictWriter(
+                f, fieldnames=self._CSV_FIELDS, extrasaction="ignore"
+            )
             writer.writeheader()
             writer.writerows(rows)
+
+    def _row(
+        self, *, filename: str, note: str, articulation: str, midi_note: int = 57
+    ) -> dict:
+        """Return a minimal index row with the real column names."""
+        return {
+            "filename": filename,
+            "note": note,
+            "midi_note": str(midi_note),
+            "articulation": articulation,
+            "pitch_hz": "220.0",
+            "deviation_cents": "0.0",
+            "duration_ms": "1000.0",
+            "attack_ms": "5.0",
+            "decay_db_per_ms": "0.01",
+            "vibrato_depth_cents": "0.0",
+            "vibrato_rate_hz": "0.0",
+            "source_file": "session.wav",
+            "onset_sample": "0",
+        }
 
     def test_main_writes_sfz(self, tmp_path):
         from generate_sfz import main
@@ -312,7 +344,8 @@ class TestCli:
         wav = subdir / "A3_legato_001.wav"
         _write_wav(wav, peak=0.5)
         self._write_index(tmp_path, [
-            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
         ])
         rc = main([str(tmp_path), "--articulations", "legato"])
         assert rc == 0
@@ -323,7 +356,8 @@ class TestCli:
 
         # Write an index with no matching articulation
         self._write_index(tmp_path, [
-            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
         ])
         rc = main([str(tmp_path), "--articulations", "staccato"])
         assert rc == 1
@@ -336,7 +370,8 @@ class TestCli:
         wav = subdir / "A3_legato_001.wav"
         _write_wav(wav, peak=0.5)
         self._write_index(tmp_path, [
-            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
         ])
         rc = main([str(tmp_path), "--articulations", "legato", "--no-normalize"])
         assert rc == 0
@@ -351,7 +386,8 @@ class TestCli:
         wav = subdir / "A3_legato_001.wav"
         _write_wav(wav, peak=0.5)
         self._write_index(tmp_path, [
-            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
         ])
         main([str(tmp_path), "--articulations", "legato"])
         text = (tmp_path / "legato.sfz").read_text()
@@ -365,12 +401,39 @@ class TestCli:
         wav = subdir / "A3_legato_001.wav"
         _write_wav(wav, peak=0.5)
         self._write_index(tmp_path, [
-            {"articulation": "legato", "note": "A3", "file": "legato/A3_legato_001.wav", "take": 1},
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
         ])
         main([str(tmp_path), "--articulations", "legato", "--loop-mode", "loop_sustain"])
         text = (tmp_path / "legato.sfz").read_text()
         assert "loop_mode=loop_sustain" in text
         assert "loop_mode=no_loop" not in text
+
+    def test_real_csv_column_layout(self, tmp_path):
+        """load_samples must read 'filename' (not 'file') and construct path as art/filename."""
+        from generate_sfz import main
+
+        subdir = tmp_path / "legato"
+        subdir.mkdir()
+        # Two takes: filename column only contains the basename, no subdirectory prefix.
+        for i in (1, 2):
+            wav = subdir / f"A3_legato_00{i}.wav"
+            _write_wav(wav, peak=0.6)
+        self._write_index(tmp_path, [
+            self._row(filename="A3_legato_001.wav", note="A3",
+                      articulation="legato", midi_note=57),
+            self._row(filename="A3_legato_002.wav", note="A3",
+                      articulation="legato", midi_note=57),
+        ])
+        rc = main([str(tmp_path), "--articulations", "legato", "--no-normalize"])
+        assert rc == 0
+        text = (tmp_path / "legato.sfz").read_text()
+        # Both takes present → round-robin
+        assert "seq_length=2" in text
+        assert "seq_position=1" in text
+        assert "seq_position=2" in text
+        # Paths use the real subdirectory layout: legato/A3_legato_001.wav
+        assert "legato/A3_legato_001.wav" in text
 
 
 # ---------------------------------------------------------------------------

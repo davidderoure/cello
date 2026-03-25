@@ -149,19 +149,29 @@ def load_samples(
 
     with index_path.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            art  = row.get("articulation", "").strip()
-            note = row.get("note", "").strip()
-            file = row.get("file", "").strip()
-            take = int(row.get("take", 1))
+            art      = row.get("articulation", "").strip()
+            note     = row.get("note", "").strip()
+            filename = row.get("filename", "").strip()
 
-            if art not in articulations or not note or not file:
+            if art not in articulations or not note or not filename:
                 continue
 
             midi = name_to_midi(note)
             if midi is None:
                 continue
 
-            wav_path = output_dir / file
+            # File lives at output_dir / articulation / filename.
+            wav_path = output_dir / art / filename
+
+            # Extract take number from the filename suffix (_001, _002, …).
+            # Falls back to 0 so that unknown filenames sort before known ones.
+            stem = Path(filename).stem          # e.g. "A3_legato_001"
+            *_, suffix = stem.rsplit("_", 1)    # last underscore-separated token
+            try:
+                take = int(suffix)
+            except ValueError:
+                take = 0
+
             raw[art][midi].append((take, wav_path))
 
     # Sort each note's list by take number.
