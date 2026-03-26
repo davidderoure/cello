@@ -85,6 +85,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MS",
         help="Minimum inter-onset gap in milliseconds.",
     )
+    onset_group.add_argument(
+        "--pre-onset-ms",
+        type=float,
+        default=config.PRE_ONSET_SAMPLES / 48_000 * 1000,
+        metavar="MS",
+        help=(
+            "Milliseconds of audio prepended before each detected onset to "
+            "capture the bow attack.  Raise if samples sound clipped at the "
+            "start; lower if too much silence or bleed is included."
+        ),
+    )
 
     # --- Quality gating options ---
     quality_group = p.add_argument_group("Quality gating")
@@ -160,6 +171,7 @@ def apply_overrides(args: argparse.Namespace) -> None:
     """
     config.ONSET_THRESHOLD_MULTIPLIER = args.onset_threshold
     config.MIN_NOTE_DURATION_MS = args.min_note_ms
+    config.PRE_ONSET_SAMPLES = int(args.pre_onset_ms / 1000 * 48_000)
     config.PITCH_CONFIDENCE_THRESHOLD = args.pitch_confidence
     config.MAX_INTONATION_DEVIATION_CENTS = args.max_intonation_cents
     config.POLYPHONY_SALIENCE_THRESHOLD = args.polyphony_threshold

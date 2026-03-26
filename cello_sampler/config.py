@@ -21,9 +21,11 @@ OVERLAP_SECONDS: float = 2.0
 #: truncated (likely a bow hold or sustained passage, not a discrete note).
 MAX_NOTE_DURATION_SECONDS: float = 8.0
 
-#: Samples prepended before each detected onset to capture the full transient
-#: (5 ms at 48 kHz).
-PRE_ONSET_SAMPLES: int = 240
+#: Samples prepended before each detected onset to capture the bow attack.
+#: Cello bow engagement typically takes 20–50 ms before the onset detector fires,
+#: so this pad must be large enough to include that transient.  Default 960 = 20 ms
+#: at 48 kHz.  Raise to ~2400 (50 ms) if attacks still sound clipped.
+PRE_ONSET_SAMPLES: int = 960
 
 #: Samples of gap removed from the end of a note window before the next onset
 #: (10 ms at 48 kHz).  Prevents bleed from the following attack into a legato tail.

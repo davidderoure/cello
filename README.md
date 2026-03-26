@@ -173,6 +173,7 @@ I/O options:
 Onset detection:
   --onset-threshold MULT  Onset strength as multiple of local mean (default: 1.5)
   --min-note-ms MS        Minimum inter-onset gap in ms (default: 50.0)
+  --pre-onset-ms MS       Audio kept before each onset to capture bow attack (default: 20.0)
 
 Quality gating:
   --pitch-confidence CONF       Minimum CREPE confidence 0-1 (default: 0.85)
@@ -194,6 +195,8 @@ command line without touching source code. Common adjustments:
 
 | Symptom | Fix |
 |---|---|
+| Samples lack attack / sound clipped at start | Raise `--pre-onset-ms` (e.g. `50`) |
+| Too much silence or bleed before each note | Lower `--pre-onset-ms` (e.g. `10`) |
 | Too many onsets in noisy passages | Raise `--onset-threshold` (e.g. `2.0`) |
 | Quiet notes missed | Lower `--onset-threshold` (e.g. `1.2`) |
 | Good notes rejected for polyphony | Raise `--polyphony-threshold` (e.g. `0.45`) |
